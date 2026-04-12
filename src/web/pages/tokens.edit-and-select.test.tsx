@@ -333,6 +333,90 @@ describe('Tokens edit modal and row selection', () => {
     }
   });
 
+  it('filters token rows by selected sync account and can reset to all accounts', async () => {
+    apiMock.getAccounts.mockResolvedValue([
+      {
+        id: 1,
+        username: 'alpha-user',
+        accessToken: 'session-alpha',
+        status: 'active',
+        credentialMode: 'session',
+        capabilities: { canCheckin: true, canRefreshBalance: true, proxyOnly: false },
+        site: { id: 10, name: 'Alpha Site', platform: 'new-api', status: 'active', url: 'https://alpha.example.com' },
+      },
+      {
+        id: 2,
+        username: 'beta-user',
+        accessToken: 'session-beta',
+        status: 'active',
+        credentialMode: 'session',
+        capabilities: { canCheckin: true, canRefreshBalance: true, proxyOnly: false },
+        site: { id: 20, name: 'Beta Site', platform: 'new-api', status: 'active', url: 'https://beta.example.com' },
+      },
+    ]);
+    apiMock.getAccountTokens.mockResolvedValue([
+      {
+        id: 101,
+        name: 'alpha-token',
+        tokenMasked: 'sk-alpha****',
+        valueStatus: 'ready',
+        enabled: true,
+        isDefault: false,
+        updatedAt: '2026-03-08 10:00:00',
+        accountId: 1,
+        account: { username: 'alpha-user' },
+        site: { name: 'Alpha Site', url: 'https://alpha.example.com' },
+      },
+      {
+        id: 202,
+        name: 'beta-token',
+        tokenMasked: 'sk-beta****',
+        valueStatus: 'ready',
+        enabled: true,
+        isDefault: false,
+        updatedAt: '2026-03-08 10:05:00',
+        accountId: 2,
+        account: { username: 'beta-user' },
+        site: { name: 'Beta Site', url: 'https://beta.example.com' },
+      },
+    ]);
+
+    let root!: WebTestRenderer;
+    try {
+      await act(async () => {
+        root = buildTokensRoot();
+      });
+      await flushMicrotasks();
+
+      expect(collectText(root.root)).toContain('alpha-token');
+      expect(collectText(root.root)).toContain('beta-token');
+
+      const syncAccountSelect = root.root.findAllByType(ModernSelect)
+        .find((node) => node.props.placeholder === '选择账号后同步站点令牌');
+      expect(syncAccountSelect).toBeTruthy();
+
+      await act(async () => {
+        syncAccountSelect!.props.onChange('2');
+      });
+      await flushMicrotasks();
+
+      const filteredText = collectText(root.root);
+      expect(filteredText).toContain('beta-token');
+      expect(filteredText).not.toContain('alpha-token');
+
+      await act(async () => {
+        syncAccountSelect!.props.onChange('0');
+      });
+      await flushMicrotasks();
+
+      const resetText = collectText(root.root);
+      expect(resetText).toContain('alpha-token');
+      expect(resetText).toContain('beta-token');
+    } finally {
+      root?.unmount();
+    }
+  });
+
   it('shows placeholder guidance and saves masked_pending tokens as ready values', async () => {
     apiMock.getAccountTokens.mockResolvedValue([
       {
@@ -436,6 +520,15 @@ describe('Tokens edit modal and row selection', () => {
     try {
       await act(async () => {
         root = buildTokensRoot();
+      });
+      await flushMicrotasks();
+
+      const syncAccountSelect = root.root.findAllByType(ModernSelect)
+        .find((node) => node.props.placeholder === '选择账号后同步站点令牌');
+      expect(syncAccountSelect).toBeTruthy();
+
+      await act(async () => {
+        syncAccountSelect!.props.onChange('1');
       });
       await flushMicrotasks();
 

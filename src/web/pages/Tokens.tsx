@@ -188,9 +188,10 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
       setAccounts(latestAccounts);
 
       const syncableAccounts = latestAccounts.filter(isAccountSyncable);
-      const hasCurrentSelected = syncableAccounts.some((account: SyncableAccount) => account.id === syncingAccountId);
+      const hasCurrentSelected = syncingAccountId === 0
+        || syncableAccounts.some((account: SyncableAccount) => account.id === syncingAccountId);
       if (!hasCurrentSelected) {
-        setSyncingAccountId(syncableAccounts[0]?.id || 0);
+        setSyncingAccountId(0);
       }
       return {
         tokens: nextTokens,
@@ -296,12 +297,18 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
     };
   }, [editingToken?.id, editingToken?.accountId]);
 
+  const filteredTokens = useMemo(() => (
+    syncingAccountId > 0
+      ? tokens.filter((token) => Number(token?.accountId || 0) === syncingAccountId)
+      : tokens
+  ), [syncingAccountId, tokens]);
+
   const accountClusteredTokens = useMemo(() => {
     const accountLabel = (token: any) => String(token?.account?.username || `account-${token?.accountId || 0}`).toLowerCase();
     const siteLabel = (token: any) => String(token?.site?.name || '').toLowerCase();
     const tokenName = (token: any) => String(token?.name || '').toLowerCase();
 
-    return [...tokens].sort((left, right) => {
+    return [...filteredTokens].sort((left, right) => {
       const accountCmp = accountLabel(left).localeCompare(accountLabel(right));
       if (accountCmp !== 0) return accountCmp;
       const siteCmp = siteLabel(left).localeCompare(siteLabel(right));
@@ -310,7 +317,7 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
       if (nameCmp !== 0) return nameCmp;
       return Number(left?.id || 0) - Number(right?.id || 0);
     });
-  }, [tokens]);
+  }, [filteredTokens]);
   const allVisibleTokensSelected = accountClusteredTokens.length > 0
     && accountClusteredTokens.every((token) => selectedTokenIds.includes(token.id));
 
@@ -326,6 +333,9 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
       };
     })
   ), [activeAccounts]);
+  const handleSyncAccountChange = useCallback((nextValue: string) => {
+    setSyncingAccountId(Number.parseInt(nextValue, 10) || 0);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -803,9 +813,9 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
             <ModernSelect
               size="sm"
               value={String(syncingAccountId || 0)}
-              onChange={(nextValue) => setSyncingAccountId(Number.parseInt(nextValue, 10) || 0)}
+              onChange={handleSyncAccountChange}
               options={[
-                { value: '0', label: '选择账号后同步站点令牌' },
+                { value: '0', label: '全部账号（显示全部令牌）' },
                 ...activeAccountSelectOptions,
               ]}
               placeholder="选择账号后同步站点令牌"
@@ -838,7 +848,7 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
         {showAdd ? '取消' : '+ 新增令牌'}
       </button>
     </div>
-  ), [activeAccountSelectOptions, activeAccounts.length, allVisibleTokensSelected, embedded, handleSync, handleSyncAll, handleToggleAdd, isMobile, showAdd, syncing, syncingAccountId, syncingAll]);
+  ), [activeAccountSelectOptions, activeAccounts.length, allVisibleTokensSelected, embedded, handleSync, handleSyncAccountChange, handleSyncAll, handleToggleAdd, isMobile, showAdd, syncing, syncingAccountId, syncingAll]);
 
   useEffect(() => {
     if (!embedded || !onEmbeddedActionsChange) return;
@@ -868,9 +878,9 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>同步账号</div>
               <ModernSelect
                 value={String(syncingAccountId || 0)}
-                onChange={(nextValue) => setSyncingAccountId(Number.parseInt(nextValue, 10) || 0)}
+                onChange={handleSyncAccountChange}
                 options={[
-                  { value: '0', label: '选择账号后同步站点令牌' },
+                  { value: '0', label: '全部账号（显示全部令牌）' },
                   ...activeAccountSelectOptions,
                 ]}
                 placeholder="选择账号后同步站点令牌"
@@ -1176,7 +1186,7 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
             <div className="skeleton" style={{ width: '100%', height: 34, marginBottom: 8 }} />
             <div className="skeleton" style={{ width: '100%', height: 34 }} />
           </div>
-        ) : tokens.length > 0 ? (
+        ) : accountClusteredTokens.length > 0 ? (
           isMobile ? (
             <div className="mobile-card-list">
               {accountClusteredTokens.map((token: any) => {
@@ -1447,8 +1457,12 @@ export function TokensPanel({ embedded = false, onEmbeddedActionsChange }: Token
         ) : (
           <div className="empty-state">
             <svg className="empty-state-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
-            <div className="empty-state-title">暂无令牌</div>
-            <div className="empty-state-desc">可先同步站点令牌，或直接在站点创建新令牌。</div>
+            <div className="empty-state-title">{tokens.length > 0 ? '当前筛选账号暂无令牌' : '暂无令牌'}</div>
+            <div className="empty-state-desc">
+              {tokens.length > 0
+                ? '请切换账号，或选择“全部账号（显示全部令牌）”。'
+                : '可先同步站点令牌，或直接在站点创建新令牌。'}
+            </div>
           </div>
         )}
       </div>
