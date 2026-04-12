@@ -164,7 +164,7 @@ export async function selectSiteApiEndpointTarget(
       kind: 'site-fallback',
       siteId: site.id,
       endpointId: null,
-      baseUrl: normalizeSiteApiEndpointBaseUrl(site.url),
+      baseUrl: normalizeSiteApiEndpointBaseUrl(site.apiBaseUrl || site.url),
       configuredEndpointCount: 0,
       endpoint: null,
     };

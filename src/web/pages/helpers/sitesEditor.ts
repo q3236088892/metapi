@@ -14,6 +14,7 @@ export type SiteApiEndpointField = {
 export type SiteForm = {
   name: string;
   url: string;
+  apiBaseUrl: string;
   externalCheckinUrl: string;
   platform: string;
   proxyUrl: string;
@@ -30,6 +31,7 @@ export type SiteEditorState =
 export type SiteSavePayload = {
   name: string;
   url: string;
+  apiBaseUrl: string;
   externalCheckinUrl: string;
   platform: string;
   initializationPresetId?: string | null;
@@ -69,6 +71,7 @@ export function emptySiteForm(): SiteForm {
   return {
     name: '',
     url: '',
+    apiBaseUrl: '',
     externalCheckinUrl: '',
     platform: '',
     proxyUrl: '',
@@ -127,7 +130,8 @@ function parseApiEndpointsForEditor(raw: unknown): SiteApiEndpointField[] {
   return ensureSiteApiEndpointRows(rows);
 }
 
-export function siteFormFromSite(site: Partial<Omit<SiteForm, 'apiEndpoints' | 'customHeaders' | 'globalWeight' | 'externalCheckinUrl' | 'proxyUrl' | 'useSystemProxy'>> & {
+export function siteFormFromSite(site: Partial<Omit<SiteForm, 'apiEndpoints' | 'customHeaders' | 'globalWeight' | 'apiBaseUrl' | 'externalCheckinUrl' | 'proxyUrl' | 'useSystemProxy'>> & {
+  apiBaseUrl?: string | null;
   externalCheckinUrl?: string | null;
   proxyUrl?: string | null;
   useSystemProxy?: boolean | null;
@@ -145,6 +149,7 @@ export function siteFormFromSite(site: Partial<Omit<SiteForm, 'apiEndpoints' | '
   return {
     name: site.name ?? '',
     url: site.url ?? '',
+    apiBaseUrl: site.apiBaseUrl ?? '',
     externalCheckinUrl: site.externalCheckinUrl ?? '',
     platform: site.platform ?? '',
     proxyUrl: site.proxyUrl ?? '',

@@ -87,6 +87,40 @@ function normalizeOptionalExternalCheckinUrl(input: unknown): {
   return { valid: true, present: true, url: parsed.toString().replace(/\/+$/, '') };
 }
 
+function normalizeOptionalSiteApiBaseUrl(input: unknown): {
+  valid: boolean;
+  present: boolean;
+  url: string | null;
+} {
+  if (input === undefined) {
+    return { valid: true, present: false, url: null };
+  }
+  if (input === null) {
+    return { valid: true, present: true, url: null };
+  }
+  if (typeof input !== 'string') {
+    return { valid: false, present: true, url: null };
+  }
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return { valid: true, present: true, url: null };
+  }
+  const normalized = normalizeSiteApiEndpointBaseUrl(trimmed);
+  if (!normalized) {
+    return { valid: false, present: true, url: null };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    return { valid: false, present: true, url: null };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { valid: false, present: true, url: null };
+  }
+  return { valid: true, present: true, url: normalized };
+}
+
 type ErrorLike = {
   message?: string;
   code?: string | number;
@@ -247,10 +281,11 @@ async function loadSiteApiEndpointsBySiteIds(siteIds: number[]) {
   return bySiteId;
 }
 
-async function attachSiteApiEndpoints<T extends { id: number }>(siteRows: T[]) {
+async function attachSiteApiEndpoints<T extends { id: number; url: string; apiBaseUrl?: string | null }>(siteRows: T[]) {
   const bySiteId = await loadSiteApiEndpointsBySiteIds(siteRows.map((row) => row.id));
   return siteRows.map((row) => ({
     ...row,
+    apiBaseUrl: normalizeSiteApiEndpointBaseUrl(row.apiBaseUrl || row.url),
     apiEndpoints: bySiteId.get(row.id) || [],
   }));
 }
@@ -458,7 +493,7 @@ export async function sitesRoutes(app: FastifyInstance) {
     if (!parsedBody.success) {
       return reply.code(400).send({ error: parsedBody.error });
     }
-    const createBody = parsedBody.data as typeof parsedBody.data & { apiEndpoints?: unknown };
+    const createBody = parsedBody.data as typeof parsedBody.data & { apiEndpoints?: unknown; apiBaseUrl?: unknown };
     const {
       name,
       url,
@@ -473,6 +508,7 @@ export async function sitesRoutes(app: FastifyInstance) {
       sortOrder,
       globalWeight,
       apiEndpoints,
+      apiBaseUrl,
     } = createBody;
     const normalizedStatus = normalizeSiteStatus(status);
     if (status !== undefined && !normalizedStatus) {
@@ -489,6 +525,10 @@ export async function sitesRoutes(app: FastifyInstance) {
     const normalizedExternalCheckinUrl = normalizeOptionalExternalCheckinUrl(externalCheckinUrl);
     if (!normalizedExternalCheckinUrl.valid) {
       return reply.code(400).send({ error: 'Invalid externalCheckinUrl. Expected a valid http(s) URL.' });
+    }
+    const normalizedApiBaseUrl = normalizeOptionalSiteApiBaseUrl(apiBaseUrl);
+    if (!normalizedApiBaseUrl.valid) {
+      return reply.code(400).send({ error: 'Invalid apiBaseUrl. Expected a valid http(s) URL.' });
     }
     const normalizedPinned = normalizePinnedFlag(isPinned);
     if (isPinned !== undefined && normalizedPinned === null) {
@@ -522,6 +562,7 @@ export async function sitesRoutes(app: FastifyInstance) {
     const analyzedPrimarySiteUrl = analyzePrimarySiteUrl(url);
     const canonicalUrl = analyzedPrimarySiteUrl.persistedUrl;
     const detectionUrl = analyzedPrimarySiteUrl.canonicalUrl || canonicalUrl;
+    const canonicalApiBaseUrl = normalizedApiBaseUrl.url === canonicalUrl ? null : normalizedApiBaseUrl.url;
     const canonicalPlatform = normalizeSitePlatform(platform);
     let detectedPlatform = canonicalPlatform;
     let responseInitializationPresetId: string | null = explicitInitializationPreset?.id || null;
@@ -551,6 +592,7 @@ export async function sitesRoutes(app: FastifyInstance) {
         const siteInsert = await tx.insert(schema.sites).values({
           name,
           url: canonicalUrl,
+          apiBaseUrl: canonicalApiBaseUrl,
           platform: detectedPlatform,
           proxyUrl: normalizedProxyUrl.proxyUrl,
           useSystemProxy: normalizedUseSystemProxy ?? false,
@@ -613,7 +655,7 @@ export async function sitesRoutes(app: FastifyInstance) {
     }
 
     const updates: any = {};
-    const body = parsedBody.data as typeof parsedBody.data & { apiEndpoints?: unknown };
+    const body = parsedBody.data as typeof parsedBody.data & { apiEndpoints?: unknown; apiBaseUrl?: unknown };
     const normalizedStatus = normalizeSiteStatus(body.status);
     if (body.status !== undefined && !normalizedStatus) {
       return reply.code(400).send({ error: 'Invalid site status. Expected active or disabled.' });
@@ -629,6 +671,10 @@ export async function sitesRoutes(app: FastifyInstance) {
     const normalizedExternalCheckinUrl = normalizeOptionalExternalCheckinUrl(body.externalCheckinUrl);
     if (!normalizedExternalCheckinUrl.valid) {
       return reply.code(400).send({ error: 'Invalid externalCheckinUrl. Expected a valid http(s) URL.' });
+    }
+    const normalizedApiBaseUrl = normalizeOptionalSiteApiBaseUrl(body.apiBaseUrl);
+    if (!normalizedApiBaseUrl.valid) {
+      return reply.code(400).send({ error: 'Invalid apiBaseUrl. Expected a valid http(s) URL.' });
     }
     const normalizedPinned = normalizePinnedFlag(body.isPinned);
     if (body.isPinned !== undefined && normalizedPinned === null) {
@@ -674,6 +720,14 @@ export async function sitesRoutes(app: FastifyInstance) {
 
     if (body.name !== undefined) updates.name = body.name;
     if (body.url !== undefined) updates.url = nextUrl;
+    if (normalizedApiBaseUrl.present) {
+      updates.apiBaseUrl = normalizedApiBaseUrl.url === nextUrl ? null : normalizedApiBaseUrl.url;
+    } else if (
+      body.url !== undefined
+      && normalizeSiteApiEndpointBaseUrl(existingSite.apiBaseUrl || '') === normalizeSiteApiEndpointBaseUrl(existingSite.url)
+    ) {
+      updates.apiBaseUrl = null;
+    }
     if (body.platform !== undefined) updates.platform = nextPlatform;
     if (normalizedProxyUrl.present) updates.proxyUrl = normalizedProxyUrl.proxyUrl;
     if (body.useSystemProxy !== undefined) updates.useSystemProxy = normalizedUseSystemProxy;

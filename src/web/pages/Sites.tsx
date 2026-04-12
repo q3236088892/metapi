@@ -51,6 +51,7 @@ type SiteRow = {
   id: number;
   name: string;
   url: string;
+  apiBaseUrl?: string | null;
   externalCheckinUrl?: string | null;
   platform?: string;
   status?: string;
@@ -547,6 +548,7 @@ export default function Sites() {
     const payload = {
       name: form.name.trim(),
       url: primarySiteUrlAnalysis.persistedUrl || form.url.trim(),
+      apiBaseUrl: form.apiBaseUrl.trim(),
       externalCheckinUrl: form.externalCheckinUrl.trim(),
       platform: form.platform.trim(),
       initializationPresetId: selectedInitializationPresetId,
@@ -1094,7 +1096,16 @@ export default function Sites() {
                 data-testid="site-primary-url-input"
                 placeholder="准确主站点 URL（面板/登录/签到地址，如 https://nih.cc）"
                 value={form.url}
-                onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))}
+                onChange={(e) => setForm((prev) => {
+                  const nextUrl = e.target.value;
+                  const currentApiBaseUrl = prev.apiBaseUrl.trim();
+                  const shouldSyncApiBaseUrl = !currentApiBaseUrl || currentApiBaseUrl === prev.url.trim();
+                  return {
+                    ...prev,
+                    url: nextUrl,
+                    apiBaseUrl: shouldSyncApiBaseUrl ? nextUrl : prev.apiBaseUrl,
+                  };
+                })}
                 onBlur={() => {
                   if (form.url.trim() && !form.platform.trim()) {
                     handleDetect();
@@ -1130,12 +1141,16 @@ export default function Sites() {
                     setSelectedInitializationPresetId(preset.id);
                     setForm((prev) => {
                       const currentUrl = prev.url.trim();
+                      const currentApiBaseUrl = prev.apiBaseUrl.trim();
                       const shouldFillDefaultUrl = !currentUrl
                         || (activeInitializationPreset?.defaultUrl && currentUrl === activeInitializationPreset.defaultUrl);
+                      const nextUrl = shouldFillDefaultUrl && preset.defaultUrl ? preset.defaultUrl : prev.url;
+                      const shouldSyncApiBaseUrl = !currentApiBaseUrl || currentApiBaseUrl === currentUrl;
                       return {
                         ...prev,
                         platform: preset.platform,
-                        url: shouldFillDefaultUrl && preset.defaultUrl ? preset.defaultUrl : prev.url,
+                        url: nextUrl,
+                        apiBaseUrl: shouldSyncApiBaseUrl ? nextUrl : prev.apiBaseUrl,
                       };
                     });
                     return;
@@ -1147,6 +1162,12 @@ export default function Sites() {
                 placeholder="平台类型（可自动检测）"
               />
             </div>
+            <input
+              placeholder="API 基础地址（可选，默认跟随主站点 URL，如 https://api.nih.cc）"
+              value={form.apiBaseUrl}
+              onChange={(e) => setForm((prev) => ({ ...prev, apiBaseUrl: e.target.value }))}
+              style={formInputStyle}
+            />
             <input
               placeholder="外部签到/福利站点 URL（可选）"
               value={form.externalCheckinUrl}
@@ -1167,7 +1188,7 @@ export default function Sites() {
             </div>
           )}
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-            请填写准确的主站点 URL。这里填写主站点/面板/登录地址，用于登录、签到、面板接口和系统访问令牌管理；不要把 OpenAI/Gemini 请求路径直接填到主站点 URL；如果 API 请求地址和主站点不同，请在下面的 API 请求地址池里填写。
+            请填写准确的主站点 URL。这里填写主站点/面板/登录地址，用于登录、签到、面板接口和系统访问令牌管理；不要把 OpenAI/Gemini 请求路径直接填到主站点 URL。若 API 域名与主站点不同，可先填写上面的 API 基础地址；需要多节点轮换时再配置下方 API 请求地址池。
           </div>
           {primarySiteUrlAnalysis.action === 'auto_strip_known_api_suffix' && primarySiteUrlAnalysis.persistedUrl ? (
             <div className="alert alert-info animate-scale-in">

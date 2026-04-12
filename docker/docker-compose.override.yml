@@ -7,3 +7,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        DEBIAN_MIRROR_BASE: ${METAPI_DOCKER_APT_MIRROR_BASE:-http://deb.debian.org/debian}
+        DEBIAN_SECURITY_MIRROR_BASE: ${METAPI_DOCKER_APT_SECURITY_MIRROR_BASE:-http://deb.debian.org/debian-security}
+        INSTALL_K8S_TOOLS: ${METAPI_INSTALL_K8S_TOOLS:-false}

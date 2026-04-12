@@ -16,6 +16,7 @@ describe('buildSiteSaveAction', () => {
       {
         name: 'site-a',
         url: 'https://a.example.com/',
+        apiBaseUrl: 'https://api.a.example.com',
         externalCheckinUrl: 'https://checkin.a.example.com',
         platform: 'new-api',
         proxyUrl: 'socks5://127.0.0.1:1080',
@@ -34,6 +35,7 @@ describe('buildSiteSaveAction', () => {
       payload: {
         name: 'site-a',
         url: 'https://a.example.com/',
+        apiBaseUrl: 'https://api.a.example.com',
         externalCheckinUrl: 'https://checkin.a.example.com',
         platform: 'new-api',
         proxyUrl: 'socks5://127.0.0.1:1080',
@@ -54,6 +56,7 @@ describe('buildSiteSaveAction', () => {
       {
         name: 'site-b',
         url: 'https://b.example.com',
+        apiBaseUrl: '',
         externalCheckinUrl: '',
         platform: 'one-api',
         proxyUrl: '',
@@ -70,6 +73,7 @@ describe('buildSiteSaveAction', () => {
       payload: {
         name: 'site-b',
         url: 'https://b.example.com',
+        apiBaseUrl: '',
         externalCheckinUrl: '',
         platform: 'one-api',
         proxyUrl: '',
@@ -88,6 +92,7 @@ describe('buildSiteSaveAction', () => {
         {
           name: 'site-c',
           url: 'https://c.example.com',
+          apiBaseUrl: '',
           externalCheckinUrl: '',
           platform: '',
           proxyUrl: '',
@@ -124,7 +129,9 @@ describe('buildSiteSaveAction', () => {
     expect(emptySiteForm().customHeaders).toEqual([emptySiteCustomHeader()]);
     expect(emptySiteForm().apiEndpoints).toEqual([emptySiteApiEndpoint()]);
     expect(emptySiteForm().proxyUrl).toBe('');
+    expect(emptySiteForm().apiBaseUrl).toBe('');
     expect(siteFormFromSite(legacySite)).not.toHaveProperty('apiKey');
+    expect(siteFormFromSite({ apiBaseUrl: 'https://api.example.com' }).apiBaseUrl).toBe('https://api.example.com');
     expect(siteFormFromSite({
       proxyUrl: 'http://127.0.0.1:8080',
     }).proxyUrl).toBe('http://127.0.0.1:8080');

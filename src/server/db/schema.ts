@@ -5,6 +5,7 @@ export const sites = sqliteTable('sites', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
   url: text('url').notNull(),
+  apiBaseUrl: text('api_base_url'),
   externalCheckinUrl: text('external_checkin_url'),
   platform: text('platform').notNull(), // 'new-api' | 'one-api' | 'veloera' | 'one-hub' | 'done-hub' | 'sub2api' | 'openai' | 'claude' | 'gemini' | 'codex' | 'gemini-cli' | 'antigravity'
   proxyUrl: text('proxy_url'),

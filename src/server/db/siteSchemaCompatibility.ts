@@ -21,6 +21,14 @@ export type SiteTableCompatibilitySpec = {
 
 export const SITE_COLUMN_COMPATIBILITY_SPECS: SiteColumnCompatibilitySpec[] = [
   {
+    column: 'api_base_url',
+    addSql: {
+      sqlite: 'ALTER TABLE sites ADD COLUMN api_base_url text;',
+      mysql: 'ALTER TABLE `sites` ADD COLUMN `api_base_url` TEXT NULL',
+      postgres: 'ALTER TABLE "sites" ADD COLUMN "api_base_url" TEXT',
+    },
+  },
+  {
     column: 'proxy_url',
     addSql: {
       sqlite: 'ALTER TABLE sites ADD COLUMN proxy_url text;',

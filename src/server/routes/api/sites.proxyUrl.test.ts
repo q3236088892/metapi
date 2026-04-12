@@ -3,6 +3,7 @@ import { describe, expect, it, beforeAll, beforeEach, afterAll } from 'vitest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
+import { eq } from 'drizzle-orm';
 
 type DbModule = typeof import('../../db/index.js');
 
@@ -50,6 +51,7 @@ describe('sites proxy settings', () => {
           'cf-access-client-id': 'site-client-id',
           'x-site-scope': 'internal',
         }),
+        apiBaseUrl: 'https://api.proxy-site.example.com/',
         externalCheckinUrl: 'https://checkin.example.com/welfare',
         globalWeight: 1.5,
       },
@@ -61,12 +63,14 @@ describe('sites proxy settings', () => {
       useSystemProxy?: boolean;
       customHeaders?: string | null;
       externalCheckinUrl?: string | null;
+      apiBaseUrl?: string | null;
       globalWeight?: number;
     };
     expect(payload.proxyUrl).toBe('socks5://127.0.0.1:1080');
     expect(payload.useSystemProxy).toBe(true);
     expect(payload.customHeaders).toBe('{"cf-access-client-id":"site-client-id","x-site-scope":"internal"}');
     expect(payload.externalCheckinUrl).toBe('https://checkin.example.com/welfare');
+    expect(payload.apiBaseUrl).toBe('https://api.proxy-site.example.com');
     expect(payload.globalWeight).toBe(1.5);
   });
 
@@ -206,13 +210,15 @@ describe('sites proxy settings', () => {
       payload: {
         proxyUrl: 'http://127.0.0.1:8080',
         useSystemProxy: true,
+        apiBaseUrl: 'https://api.toggle-site.example.com',
       },
     });
 
     expect(response.statusCode).toBe(200);
-    const payload = response.json() as { proxyUrl?: string | null; useSystemProxy?: boolean };
+    const payload = response.json() as { proxyUrl?: string | null; useSystemProxy?: boolean; apiBaseUrl?: string | null };
     expect(payload.proxyUrl).toBe('http://127.0.0.1:8080');
     expect(payload.useSystemProxy).toBe(true);
+    expect(payload.apiBaseUrl).toBe('https://api.toggle-site.example.com');
   });
 
   it('clears optional editor fields when updating a site with empty strings', async () => {
@@ -242,6 +248,7 @@ describe('sites proxy settings', () => {
         useSystemProxy: false,
         customHeaders: '',
         externalCheckinUrl: '',
+        apiBaseUrl: '',
       },
     });
 
@@ -251,11 +258,16 @@ describe('sites proxy settings', () => {
       useSystemProxy?: boolean;
       customHeaders?: string | null;
       externalCheckinUrl?: string | null;
+      apiBaseUrl?: string | null;
     };
     expect(payload.proxyUrl).toBeNull();
     expect(payload.useSystemProxy).toBe(false);
     expect(payload.customHeaders).toBeNull();
     expect(payload.externalCheckinUrl).toBeNull();
+    expect(payload.apiBaseUrl).toBe('https://editable-site.example.com');
+
+    const stored = await db.select().from(schema.sites).where(eq(schema.sites.id, site.id)).get();
+    expect(stored?.apiBaseUrl).toBeNull();
   });
 
   it('returns a conflict response when updating a site to an existing platform and url', async () => {

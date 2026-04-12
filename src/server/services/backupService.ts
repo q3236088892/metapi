@@ -1536,6 +1536,7 @@ async function importAccountsSection(section: AccountsBackupSection): Promise<vo
         id: row.id,
         name: row.name,
         url: row.url,
+        apiBaseUrl: row.apiBaseUrl ?? null,
         externalCheckinUrl: row.externalCheckinUrl ?? null,
         platform: row.platform,
         proxyUrl: row.proxyUrl ?? null,

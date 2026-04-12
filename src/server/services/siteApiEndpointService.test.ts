@@ -58,6 +58,26 @@ describe('siteApiEndpointService', () => {
     });
   });
 
+  it('prefers site apiBaseUrl as the fallback base when no api endpoint pool is configured', async () => {
+    const site = await db.insert(schema.sites).values({
+      name: 'split-host-site',
+      url: 'https://panel.example.com',
+      apiBaseUrl: 'https://api.example.com/',
+      platform: 'new-api',
+      status: 'active',
+    }).returning().get();
+
+    const selected = await selectSiteApiEndpointTarget(site, '2026-03-31T12:00:00.000Z');
+
+    expect(selected).toMatchObject({
+      kind: 'site-fallback',
+      siteId: site.id,
+      endpointId: null,
+      baseUrl: 'https://api.example.com',
+      configuredEndpointCount: 0,
+    });
+  });
+
   it('selects the least recently selected enabled endpoint when sort order is tied', async () => {
     const site = await db.insert(schema.sites).values({
       name: 'pool-site',
