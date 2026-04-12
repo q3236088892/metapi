@@ -29,6 +29,7 @@ const accountUpdatePayloadSchema = z.object({
   isPinned: z.boolean().optional(),
   sortOrder: z.number().int().min(0).optional(),
   proxyUrl: z.union([z.string(), z.null()]).optional(),
+  checkinIntervalSeconds: z.union([z.number().int().min(0).max(3600), z.null()]).optional(),
 }).passthrough();
 
 const accountBatchPayloadSchema = z.object({
@@ -119,6 +120,9 @@ function formatAccountsPayloadError(error: z.ZodError): string {
   }
   if (firstPath === 'proxyUrl') {
     return 'Invalid proxyUrl. Expected string or null.';
+  }
+  if (firstPath === 'checkinIntervalSeconds') {
+    return 'Invalid checkinIntervalSeconds. Expected integer 0-3600 or null.';
   }
   if (firstPath === 'ids') {
     return 'Invalid ids. Expected number[].';

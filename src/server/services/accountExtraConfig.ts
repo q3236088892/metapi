@@ -29,6 +29,7 @@ const VALID_CREDENTIAL_MODES = new Set<AccountCredentialMode>([
 
 type AccountExtraConfig = {
   platformUserId?: unknown;
+  checkinIntervalSeconds?: unknown;
   credentialMode?: unknown;
   useSystemProxy?: unknown;
   oauth?: {
@@ -106,6 +107,19 @@ function normalizeNonNegativeNumber(raw: unknown): number | undefined {
   return undefined;
 }
 
+function normalizeNonNegativeInteger(raw: unknown): number | undefined {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+    return Math.trunc(raw);
+  }
+  if (typeof raw === 'string') {
+    const parsed = Number.parseInt(raw.trim(), 10);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
 function normalizeIsoDateTime(raw: unknown): string | undefined {
   if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
     const ms = raw > 10_000_000_000 ? raw : raw * 1000;
@@ -156,6 +170,16 @@ export function resolveProxyUrlFromExtraConfig(
 export function getPlatformUserIdFromExtraConfig(extraConfig?: ExtraConfigInput): number | undefined {
   const parsed = parseExtraConfig(extraConfig);
   return normalizeUserId(parsed.platformUserId);
+}
+
+export function getCheckinIntervalSecondsFromExtraConfig(
+  extraConfig?: ExtraConfigInput,
+  fallbackSeconds = 0,
+): number {
+  const parsed = parseExtraConfig(extraConfig);
+  const parsedValue = normalizeNonNegativeInteger(parsed.checkinIntervalSeconds);
+  if (parsedValue === undefined) return Math.max(0, Math.trunc(fallbackSeconds));
+  return Math.min(3600, parsedValue);
 }
 
 export function getCredentialModeFromExtraConfig(extraConfig?: ExtraConfigInput): AccountCredentialMode | undefined {

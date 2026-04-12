@@ -150,6 +150,7 @@ export default function Accounts() {
     username: "",
     status: "active",
     checkinEnabled: true,
+    checkinIntervalSeconds: "",
     unitCost: "",
     accessToken: "",
     apiToken: "",
@@ -933,7 +934,16 @@ export default function Accounts() {
 
   const openEditPanel = (account: any) => {
     const managedAuth = extractManagedSub2ApiAuth(account);
-    const proxyUrl = parseAccountExtraConfig(account)?.proxyUrl || "";
+    const parsedExtraConfig = parseAccountExtraConfig(account);
+    const proxyUrl = parsedExtraConfig?.proxyUrl || "";
+    const checkinIntervalRaw = Number.parseInt(
+      String(parsedExtraConfig?.checkinIntervalSeconds ?? ""),
+      10,
+    );
+    const checkinIntervalSeconds =
+      Number.isFinite(checkinIntervalRaw) && checkinIntervalRaw > 0
+        ? String(Math.min(3600, checkinIntervalRaw))
+        : "";
     closeAddPanel();
     setRebindTarget(null);
     setEditingAccount(account);
@@ -941,6 +951,7 @@ export default function Accounts() {
       username: account?.username || "",
       status: account?.status || "active",
       checkinEnabled: account?.checkinEnabled !== false,
+      checkinIntervalSeconds,
       unitCost:
         account?.unitCost === null || account?.unitCost === undefined
           ? ""
@@ -967,6 +978,16 @@ export default function Accounts() {
         username: editForm.username.trim() || undefined,
         status: editForm.status,
         checkinEnabled: editForm.checkinEnabled,
+        checkinIntervalSeconds: editForm.checkinIntervalSeconds.trim()
+          ? Math.min(
+              3600,
+              Math.max(
+                0,
+                Number.parseInt(editForm.checkinIntervalSeconds.trim(), 10) ||
+                  0,
+              ),
+            )
+          : null,
         unitCost: editForm.unitCost.trim()
           ? Number(editForm.unitCost.trim())
           : null,
@@ -2665,6 +2686,19 @@ export default function Accounts() {
                   />
                   启用签到
                 </label>
+                <input
+                  placeholder="签到间隔秒数（可选，0-3600）"
+                  value={editForm.checkinIntervalSeconds}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      checkinIntervalSeconds: e.target.value
+                        .replace(/\D/g, "")
+                        .slice(0, 4),
+                    }))
+                  }
+                  style={inputStyle}
+                />
                 <input
                   placeholder="Access Token"
                   value={editForm.accessToken}

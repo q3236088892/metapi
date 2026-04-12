@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildStoredSub2ApiSubscriptionSummary,
   getCredentialModeFromExtraConfig,
+  getCheckinIntervalSecondsFromExtraConfig,
   hasOauthProvider,
   getPlatformUserIdFromExtraConfig,
   getProxyUrlFromExtraConfig,
@@ -23,6 +24,15 @@ describe('accountExtraConfig', () => {
     expect(getPlatformUserIdFromExtraConfig(JSON.stringify({ platformUserId: 11494 }))).toBe(11494);
     expect(getPlatformUserIdFromExtraConfig(JSON.stringify({ platformUserId: '7659' }))).toBe(7659);
     expect(getPlatformUserIdFromExtraConfig({ platformUserId: 2233 })).toBe(2233);
+  });
+
+  it('reads checkinIntervalSeconds from extra config with sane bounds', () => {
+    expect(getCheckinIntervalSecondsFromExtraConfig(JSON.stringify({ checkinIntervalSeconds: 12 }))).toBe(12);
+    expect(getCheckinIntervalSecondsFromExtraConfig(JSON.stringify({ checkinIntervalSeconds: '20' }))).toBe(20);
+    expect(getCheckinIntervalSecondsFromExtraConfig(JSON.stringify({ checkinIntervalSeconds: -5 }))).toBe(0);
+    expect(getCheckinIntervalSecondsFromExtraConfig(JSON.stringify({ checkinIntervalSeconds: 99999 }))).toBe(3600);
+    expect(getCheckinIntervalSecondsFromExtraConfig(JSON.stringify({}))).toBe(0);
+    expect(getCheckinIntervalSecondsFromExtraConfig(null, 15)).toBe(15);
   });
 
   it('guesses platformUserId from username suffix digits', () => {

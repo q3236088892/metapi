@@ -9,6 +9,7 @@ import {
   rebuildRoutesBestEffort,
 } from "../../services/accountMutationWorkflow.js";
 import {
+  getCheckinIntervalSecondsFromExtraConfig,
   getCredentialModeFromExtraConfig,
   getProxyUrlFromExtraConfig,
   guessPlatformUserIdFromUsername,
@@ -215,6 +216,21 @@ function normalizeManagedTokenExpiresAt(input: unknown): number | undefined {
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return undefined;
+}
+
+function normalizeCheckinIntervalSeconds(input: unknown): number | null {
+  if (input === undefined || input === null || input === "") return null;
+  if (typeof input === "number" && Number.isFinite(input)) {
+    const normalized = Math.trunc(input);
+    if (normalized < 0 || normalized > 3600) return null;
+    return normalized;
+  }
+  if (typeof input === "string") {
+    const parsed = Number.parseInt(input.trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 3600) return null;
+    return parsed;
+  }
+  return null;
 }
 
 async function getNextAccountSortOrder(): Promise<number> {
@@ -1511,6 +1527,38 @@ export async function accountsRoutes(app: FastifyInstance) {
         }
         updates.extraConfig = mergeAccountExtraConfig(baseExtraConfig, {
           proxyUrl: normalizedProxy ?? undefined,
+        });
+      }
+
+      if (Object.prototype.hasOwnProperty.call(body, "checkinIntervalSeconds")) {
+        const baseExtraConfig =
+          typeof updates.extraConfig === "string"
+            ? updates.extraConfig
+            : account.extraConfig;
+        const normalizedInterval = normalizeCheckinIntervalSeconds(
+          body.checkinIntervalSeconds,
+        );
+        if (
+          body.checkinIntervalSeconds !== null &&
+          body.checkinIntervalSeconds !== undefined &&
+          normalizedInterval === null
+        ) {
+          return reply.code(400).send({
+            message:
+              "Invalid checkinIntervalSeconds value. Expected integer between 0 and 3600.",
+          });
+        }
+        const existingInterval = getCheckinIntervalSecondsFromExtraConfig(
+          baseExtraConfig,
+          0,
+        );
+        const nextInterval =
+          normalizedInterval === null ? existingInterval : normalizedInterval;
+        updates.extraConfig = mergeAccountExtraConfig(baseExtraConfig, {
+          checkinIntervalSeconds:
+            normalizedInterval === null || nextInterval <= 0
+              ? undefined
+              : nextInterval,
         });
       }
 

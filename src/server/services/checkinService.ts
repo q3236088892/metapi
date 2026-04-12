@@ -7,6 +7,7 @@ import { reportTokenExpired } from './alertService.js';
 import { refreshBalance } from './balanceService.js';
 import { parseCheckinRewardAmount } from './checkinRewardParser.js';
 import {
+  getCheckinIntervalSecondsFromExtraConfig,
   getAutoReloginConfig,
   getPlatformUserIdFromExtraConfig,
   guessPlatformUserIdFromUsername,
@@ -20,6 +21,15 @@ import { formatUtcSqlDateTime } from './localTimeService.js';
 import { withAccountProxyOverride } from './siteProxy.js';
 
 type CheckinExecutionStatus = 'success' | 'failed' | 'skipped';
+
+function sleep(ms: number): Promise<void> {
+  if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveAccountCheckinDelayMs(extraConfig?: string | Record<string, unknown> | null): number {
+  return getCheckinIntervalSecondsFromExtraConfig(extraConfig, 0) * 1000;
+}
 
 function isSiteDisabled(status?: string | null): boolean {
   return (status || 'active') === 'disabled';
@@ -345,7 +355,10 @@ export async function checkinAll(options?: { accountIds?: number[]; scheduleMode
   }
 
   const promises = Array.from(grouped.entries()).map(async ([_, siteRows]) => {
-    for (const row of siteRows) {
+    for (const [index, row] of siteRows.entries()) {
+      if (index > 0) {
+        await sleep(resolveAccountCheckinDelayMs(row.accounts.extraConfig));
+      }
       const r = await checkinAccount(row.accounts.id, {
         skipEvent: true,
         scheduleMode: options?.scheduleMode,
