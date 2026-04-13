@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$ROOT_DIR/docker/docker-compose.yml"
 COMPOSE_OVERRIDE_FILE="$ROOT_DIR/docker/docker-compose.override.yml"
-DATA_DIR="$ROOT_DIR/docker/data"
+DATA_DIR="${METAPI_DATA_DIR:-/root/metapi/data}"
 
 # Deployment config. Edit these values on the server before running the script.
 METAPI_AUTH_TOKEN="shanliushi860224"
@@ -13,6 +13,7 @@ METAPI_PROXY_TOKEN="shanliushi860224860224"
 METAPI_PORT="4000"
 METAPI_TZ="Asia/Shanghai"
 METAPI_BIND_HOST="0.0.0.0"
+METAPI_DATA_DIR="${METAPI_DATA_DIR:-/root/metapi/data}"
 METAPI_DOCKER_APT_MIRROR_BASE="${METAPI_DOCKER_APT_MIRROR_BASE:-http://mirrors.tuna.tsinghua.edu.cn/debian}"
 METAPI_DOCKER_APT_SECURITY_MIRROR_BASE="${METAPI_DOCKER_APT_SECURITY_MIRROR_BASE:-http://mirrors.tuna.tsinghua.edu.cn/debian-security}"
 METAPI_INSTALL_K8S_TOOLS="${METAPI_INSTALL_K8S_TOOLS:-false}"
@@ -26,7 +27,7 @@ usage() {
 Usage: ./update-and-restart.sh [--pull] [--use-image] [--skip-backup]
 
 默认行为:
-  1. 保留现有 docker/data 数据
+  1. 保留现有 /root/metapi/data 数据
   2. 先备份数据目录
   3. 基于当前项目目录重新构建并重启容器
   4. 本地 Docker 构建默认使用脚本内配置的 Debian 镜像源，降低 apt 卡住概率
@@ -110,12 +111,14 @@ require_config "METAPI_AUTH_TOKEN" "$METAPI_AUTH_TOKEN" "change-me-admin-token"
 require_config "METAPI_PROXY_TOKEN" "$METAPI_PROXY_TOKEN" "change-me-proxy-sk-token"
 require_config "METAPI_TZ" "$METAPI_TZ" ""
 require_config "METAPI_BIND_HOST" "$METAPI_BIND_HOST" ""
+require_config "METAPI_DATA_DIR" "$METAPI_DATA_DIR" ""
 require_port
 
 export AUTH_TOKEN="$METAPI_AUTH_TOKEN"
 export PROXY_TOKEN="$METAPI_PROXY_TOKEN"
 export PORT="$METAPI_PORT"
 export TZ="$METAPI_TZ"
+export METAPI_DATA_DIR
 export METAPI_BIND_HOST
 export METAPI_DOCKER_APT_MIRROR_BASE
 export METAPI_DOCKER_APT_SECURITY_MIRROR_BASE
