@@ -44,6 +44,10 @@ export type SiteSavePayload = {
   }>;
   customHeaders: string;
   globalWeight: number;
+  postRefreshProbeEnabled?: boolean;
+  postRefreshProbeModel?: string;
+  postRefreshProbeScope?: 'single' | 'all';
+  postRefreshProbeLatencyThresholdMs?: number;
 };
 
 type SiteSaveAction =

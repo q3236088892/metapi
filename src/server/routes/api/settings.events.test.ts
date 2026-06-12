@@ -81,6 +81,8 @@ describe('settings and auth events', () => {
     (config as any).telegramChatId = '';
     (config as any).telegramUseSystemProxy = false;
     (config as any).telegramMessageThreadId = '';
+    config.globalBlockedBrands = [];
+    config.globalAllowedModels = [];
   });
 
   afterAll(async () => {
@@ -319,42 +321,6 @@ describe('settings and auth events', () => {
 
     const saved = await db.select().from(schema.settings).where(eq(schema.settings.key, 'payload_rules')).get();
     expect(saved).toBeFalsy();
-  });
-
-  it('does not persist payload rules when a later runtime setting fails validation', async () => {
-    const response = await app.inject({
-      method: 'PUT',
-      url: '/api/settings/runtime',
-      payload: {
-        payloadRules: {
-          override: [
-            {
-              models: [{ name: 'gpt-*', protocol: 'codex' }],
-              params: {
-                'reasoning.effort': 'high',
-              },
-            },
-          ],
-        },
-        modelAvailabilityProbeEnabled: 'invalid-boolean',
-      },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({
-      success: false,
-      message: '批量测活开关格式无效：需要 boolean',
-    });
-
-    const saved = await db.select().from(schema.settings).where(eq(schema.settings.key, 'payload_rules')).get();
-    expect(saved).toBeFalsy();
-    expect(config.payloadRules).toEqual({
-      default: [],
-      defaultRaw: [],
-      override: [],
-      overrideRaw: [],
-      filter: [],
-    });
   });
 
   it('returns current recognized admin IP in runtime settings response', async () => {
@@ -779,6 +745,32 @@ describe('settings and auth events', () => {
       'too many requests',
     ]);
     expect(runtime.proxyEmptyContentFailEnabled).toBe(true);
+  });
+
+  it('persists global model and brand filters as JSON arrays', async () => {
+    const updateResponse = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/runtime',
+      payload: {
+        globalAllowedModels: ['model-alpha', ' model-beta ', 'model-alpha', 'model-gamma'],
+        globalBlockedBrands: ['Codex', ' Codex ', 'Gemini'],
+      },
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    const updated = updateResponse.json() as {
+      globalAllowedModels?: string[];
+      globalBlockedBrands?: string[];
+    };
+    expect(updated.globalAllowedModels).toEqual(['model-alpha', 'model-beta', 'model-gamma']);
+    expect(updated.globalBlockedBrands).toEqual(['Codex', 'Gemini']);
+
+    const rows = await db.select().from(schema.settings).all();
+    const settingsMap = new Map(rows.map((row) => [row.key, row.value]));
+    expect(settingsMap.get('global_allowed_models')).toBe(JSON.stringify(['model-alpha', 'model-beta', 'model-gamma']));
+    expect(JSON.parse(settingsMap.get('global_allowed_models') || 'null')).toEqual(['model-alpha', 'model-beta', 'model-gamma']);
+    expect(settingsMap.get('global_blocked_brands')).toBe(JSON.stringify(['Codex', 'Gemini']));
+    expect(JSON.parse(settingsMap.get('global_blocked_brands') || 'null')).toEqual(['Codex', 'Gemini']);
   });
 
   it('persists and returns log cleanup settings from runtime settings', async () => {

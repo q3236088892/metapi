@@ -5,6 +5,8 @@ import { tokenRouter } from '../../services/tokenRouter.js';
 import { reportProxyAllFailed } from '../../services/alertService.js';
 import { hasProxyUsagePayload, mergeProxyUsage, parseProxyUsage } from '../../services/proxyUsageParser.js';
 import { type DownstreamFormat } from '../../transformers/shared/normalized.js';
+import { promoteRequiredEndpointCandidateAfterProtocolError } from '../../transformers/shared/endpointCompatibility.js';
+import { shouldForceResponsesUpstreamStream } from '../capabilities/responsesCompact.js';
 import {
   buildClaudeCountTokensUpstreamRequest,
   buildUpstreamEndpointRequest,
@@ -21,7 +23,7 @@ import {
   recordDownstreamCostUsage,
 } from '../../routes/proxy/downstreamPolicy.js';
 import { executeEndpointFlow, type BuiltEndpointRequest } from '../orchestration/endpointFlow.js';
-import { detectProxyFailure } from '../../routes/proxy/proxyFailureJudge.js';
+import { detectProxyFailure } from '../../services/proxyFailureJudge.js';
 import { openAiChatTransformer } from '../../transformers/openai/chat/index.js';
 import { anthropicMessagesTransformer } from '../../transformers/anthropic/messages/index.js';
 import { shouldPreferResponsesForAnthropicContinuation } from '../../transformers/anthropic/messages/compatibility.js';
@@ -39,17 +41,19 @@ import {
   collectResponsesFinalPayloadFromSseText,
   createSingleChunkStreamReader,
   looksLikeResponsesSseText,
-} from '../../routes/proxy/responsesSseFinal.js';
+} from '../runtime/responsesSseFinal.js';
 import {
   createGeminiCliStreamReader,
   unwrapGeminiCliPayload,
-} from '../../routes/proxy/geminiCliCompat.js';
+} from '../../transformers/gemini/generate-content/cliBridge.js';
 import { summarizeConversationFileInputsInOpenAiBody } from '../capabilities/conversationFileCapabilities.js';
 import { getObservedResponseMeta } from '../firstByteTimeout.js';
 import { getRuntimeResponseReader, readRuntimeResponseText } from '../executors/types.js';
 import { detectDownstreamClientContext } from '../downstreamClientContext.js';
 import { getProxyMaxChannelRetries } from '../../services/proxyChannelRetry.js';
 import { shouldAbortSameSiteEndpointFallback } from '../../services/proxyRetryPolicy.js';
+import { applyOpenAiServiceTierPolicy } from '../serviceTierPolicy.js';
+import { maybeHandleWebSearchOnlySimulation } from '../webSearchSimulation.js';
 import {
   acquireSurfaceChannelLease,
   bindSurfaceStickyChannel,
@@ -88,17 +92,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function asTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function prioritizeEndpointCandidate(
-  candidates: Array<'chat' | 'messages' | 'responses'>,
-  preferred: 'chat' | 'messages' | 'responses',
-): Array<'chat' | 'messages' | 'responses'> {
-  if (!candidates.includes(preferred)) return candidates;
-  return [
-    preferred,
-    ...candidates.filter((candidate) => candidate !== preferred),
-  ];
 }
 
 function finalizeRetryAsUpstreamFailure(status: number, message: string) {
@@ -153,6 +146,17 @@ export async function handleChatSurfaceRequest(
     upstreamBody,
     claudeOriginalBody,
   } = requestEnvelope.parsed;
+  if (downstreamFormat === 'claude') {
+    const handledSearch = await maybeHandleWebSearchOnlySimulation({
+      app: request.server,
+      request,
+      reply,
+      downstreamFormat: 'claude',
+      body: (claudeOriginalBody || request.body || {}) as Record<string, unknown>,
+      openAiBody: upstreamBody,
+    });
+    if (handledSearch) return;
+  }
   if (!await ensureModelAllowedForDownstreamKey(request, reply, requestedModel)) return;
   const downstreamPolicy = getDownstreamRoutingPolicy(request);
   const forcedChannelId = getTesterForcedChannelId({
@@ -292,11 +296,11 @@ export async function handleChatSurfaceRequest(
           conversationFileSummary,
           wantsContinuationAwareResponses,
         },
+        {
+          oauthProvider: oauth?.provider,
+        },
       ),
     ];
-    if (oauth?.provider === 'codex' && downstreamFormat === 'openai') {
-      endpointCandidates = prioritizeEndpointCandidate(endpointCandidates, 'responses');
-    }
     const endpointRuntimeContext = {
       siteId: selected.site.id,
       modelName,
@@ -328,11 +332,38 @@ export async function handleChatSurfaceRequest(
       })
     );
     const executeEndpointResultForSiteApiBaseUrl = async (siteApiBaseUrl: string) => {
+      const forceResponsesUpstreamStream = shouldForceResponsesUpstreamStream({
+        sitePlatform: selected.site.platform,
+        isCompactRequest: false,
+      });
       const buildEndpointRequest = (
         endpoint: 'chat' | 'messages' | 'responses',
         options: { forceNormalizeClaudeBody?: boolean } = {},
       ) => {
-        const upstreamStream = isStream || (isCodexSite && endpoint === 'responses');
+        const upstreamStream = isStream || (forceResponsesUpstreamStream && endpoint === 'responses');
+        const bodyForEndpoint = endpoint === 'responses'
+          ? (() => {
+            const policyResult = applyOpenAiServiceTierPolicy({
+              body: resolvedOpenAiBody,
+              context: {
+                requestedModel,
+                actualModel: modelName,
+                sitePlatform: selected.site.platform,
+                accountType: oauth?.planType,
+              },
+              rules: (config as any).openAiServiceTierRules,
+            });
+            if (!policyResult.ok) {
+              const error = new SiteApiEndpointRequestError(policyResult.payload.error.message, {
+                status: policyResult.statusCode,
+                rawErrText: JSON.stringify(policyResult.payload),
+              });
+              (error as SiteApiEndpointRequestError & { serviceTierBlocked?: boolean }).serviceTierBlocked = true;
+              throw error;
+            }
+            return policyResult.body;
+          })()
+          : resolvedOpenAiBody;
         const endpointRequest = buildUpstreamEndpointRequest({
           endpoint,
           modelName,
@@ -342,7 +373,7 @@ export async function handleChatSurfaceRequest(
           oauthProjectId: oauth?.projectId,
           sitePlatform: selected.site.platform,
           siteUrl: siteApiBaseUrl,
-          openaiBody: resolvedOpenAiBody,
+          openaiBody: bodyForEndpoint,
           downstreamFormat,
           claudeOriginalBody,
           forceNormalizeClaudeBody: options.forceNormalizeClaudeBody,
@@ -369,7 +400,7 @@ export async function handleChatSurfaceRequest(
         modelName,
         requestedModelHint: requestedModel,
         sitePlatform: selected.site.platform,
-        isStream: isStream || isCodexSite,
+        isStream: isStream || forceResponsesUpstreamStream,
         buildRequest: ({ endpoint, forceNormalizeClaudeBody }) => buildEndpointRequest(
           endpoint,
           { forceNormalizeClaudeBody },
@@ -455,6 +486,10 @@ export async function handleChatSurfaceRequest(
         },
         shouldDowngrade: endpointStrategy.shouldDowngrade,
         onDowngrade: async (ctx) => {
+          promoteRequiredEndpointCandidateAfterProtocolError(endpointCandidates, {
+            currentEndpoint: ctx.request.endpoint,
+            upstreamErrorText: ctx.rawErrText,
+          });
           await safeUpdateSurfaceProxyDebugAttempt(debugTrace, debugAttemptBase + ctx.endpointIndex, {
             downgradeDecision: true,
             downgradeReason: ctx.errText,
@@ -960,8 +995,24 @@ export async function handleChatSurfaceRequest(
         err instanceof SiteApiEndpointRequestError
         || err?.name === 'SiteApiEndpointRequestError'
         || err?.siteApiEndpointUpstreamFailure === true
+        || err?.serviceTierBlocked === true
         || (endpointFailureStatus !== null && endpointFailureStatus >= 500)
       );
+      if (err?.serviceTierBlocked === true) {
+        let payload: unknown = null;
+        try {
+          payload = JSON.parse(err.rawErrText || '');
+        } catch {
+          payload = {
+            error: {
+              message: err.message || 'service_tier is blocked by policy',
+              type: 'invalid_request_error',
+            },
+          };
+        }
+        await finalizeDebugFailure(endpointFailureStatus || 400, payload, null);
+        return reply.code(endpointFailureStatus || 400).send(payload);
+      }
       if (isSiteApiEndpointFailure) {
         const failureOutcome = await failureToolkit.handleUpstreamFailure({
           selected,
@@ -1183,6 +1234,10 @@ export async function handleClaudeCountTokensSurfaceRequest(
       modelName,
       'claude',
       requestedModel,
+      undefined,
+      {
+        requestKind: 'claude-count-tokens',
+      },
     );
     await safeUpdateSurfaceProxyDebugCandidates(debugTrace, {
       endpointCandidates,
@@ -1194,7 +1249,7 @@ export async function handleClaudeCountTokensSurfaceRequest(
         countTokens: true,
       },
     });
-    if (!endpointCandidates.includes('messages')) {
+    if (endpointCandidates.length === 0) {
       if (canRetryChannelSelection(retryCount, forcedChannelId)) {
         retryCount += 1;
         continue;
@@ -1388,8 +1443,24 @@ export async function handleClaudeCountTokensSurfaceRequest(
         error instanceof SiteApiEndpointRequestError
         || error?.name === 'SiteApiEndpointRequestError'
         || error?.siteApiEndpointUpstreamFailure === true
+        || error?.serviceTierBlocked === true
         || (endpointFailureStatus !== null && endpointFailureStatus >= 500)
       );
+      if (error?.serviceTierBlocked === true) {
+        let payload: unknown = null;
+        try {
+          payload = JSON.parse(error.rawErrText || '');
+        } catch {
+          payload = {
+            error: {
+              message: error.message || 'service_tier is blocked by policy',
+              type: 'invalid_request_error',
+            },
+          };
+        }
+        await finalizeDebugFailure(endpointFailureStatus || 400, payload, null);
+        return reply.code(endpointFailureStatus || 400).send(payload);
+      }
       if (isSiteApiEndpointFailure) {
         const failureOutcome = await failureToolkit.handleUpstreamFailure({
           selected,

@@ -195,6 +195,16 @@ function waitForSocketOpen(socket: WebSocket) {
   });
 }
 
+function waitForSocketClose(socket: WebSocket) {
+  return new Promise<void>((resolve) => {
+    if (socket.readyState === WebSocket.CLOSED) {
+      resolve();
+      return;
+    }
+    socket.once('close', () => resolve());
+  });
+}
+
 function waitForSocketUpgrade(socket: WebSocket) {
   return new Promise<{ headers: Record<string, string | string[] | undefined> }>((resolve, reject) => {
     socket.once('upgrade', (response) => resolve({ headers: response.headers as Record<string, string | string[] | undefined> }));
@@ -385,6 +395,7 @@ describe('responses websocket transport', () => {
     upstreamRequests = [];
     (config as any).codexResponsesWebsocketBeta = originalCodexResponsesWebsocketBeta;
     (config as any).codexUpstreamWebsocketEnabled = true;
+    (config as any).openAiServiceTierRules = undefined;
     rejectedUpgradeStatus = 426;
     rejectedUpgradeStatusText = 'Upgrade Required';
     rejectedUpgradeBody = 'Upgrade Required';
@@ -743,6 +754,131 @@ describe('responses websocket transport', () => {
           id: 'tool_out_ws_1',
           type: 'function_call_output',
           call_id: 'call_ws_1',
+          output: '{"ok":true}',
+        },
+      ],
+    });
+  });
+
+  it('infers previous_response_id for websocket tool-output follow-up turns when the client only sends conversation_id', async () => {
+    const selectedChannel = createSelectedChannel({
+      siteUrl: upstreamSiteUrl,
+    });
+    selectChannelMock.mockReturnValue(selectedChannel);
+    previewSelectedChannelMock.mockResolvedValue(selectedChannel);
+
+    const socket = createClientSocket(baseUrl, {
+      conversation_id: 'ws-conversation-prev-infer',
+    });
+    await waitForSocketOpen(socket);
+
+    const firstResponsePromise = waitForSocketMessageMatching(
+      socket,
+      (message) => message?.type === 'response.completed',
+    );
+    socket.send(JSON.stringify({
+      type: 'response.create',
+      model: 'gpt-5.4',
+      input: [],
+    }));
+    const firstResponse = await firstResponsePromise;
+
+    const secondResponsePromise = waitForSocketMessageMatching(
+      socket,
+      (message) => message?.type === 'response.completed' && message?.response?.id === 'resp_upstream_2',
+    );
+    socket.send(JSON.stringify({
+      type: 'response.create',
+      model: 'gpt-5.4',
+      input: [
+        {
+          id: 'tool_out_ws_conv_1',
+          type: 'function_call_output',
+          call_id: 'call_ws_conv_1',
+          output: '{"ok":true}',
+        },
+      ],
+    }));
+    await secondResponsePromise;
+    socket.close();
+
+    expect(firstResponse?.response?.id).toBe('resp_upstream_1');
+    expect(upstreamUpgradeHeaders.session_id).toBe('ws-conversation-prev-infer');
+    expect(upstreamUpgradeHeaders.conversation_id).toBe('ws-conversation-prev-infer');
+    expect(upstreamRequests).toHaveLength(2);
+    expect(upstreamRequests[1]).toMatchObject({
+      type: 'response.create',
+      previous_response_id: 'resp_upstream_1',
+      input: [
+        {
+          id: 'tool_out_ws_conv_1',
+          type: 'function_call_output',
+          call_id: 'call_ws_conv_1',
+          output: '{"ok":true}',
+        },
+      ],
+    });
+  });
+
+  it('preserves websocket continuation across downstream reconnects on the same conversation_id', async () => {
+    const selectedChannel = createSelectedChannel({
+      siteUrl: upstreamSiteUrl,
+    });
+    selectChannelMock.mockReturnValue(selectedChannel);
+    previewSelectedChannelMock.mockResolvedValue(selectedChannel);
+
+    const firstSocket = createClientSocket(baseUrl, {
+      conversation_id: 'ws-conversation-reconnect-1',
+    });
+    await waitForSocketOpen(firstSocket);
+
+    const firstResponsePromise = waitForSocketMessageMatching(
+      firstSocket,
+      (message) => message?.type === 'response.completed' && message?.response?.id === 'resp_upstream_1',
+    );
+    firstSocket.send(JSON.stringify({
+      type: 'response.create',
+      model: 'gpt-5.4',
+      input: [],
+    }));
+    await firstResponsePromise;
+    firstSocket.close();
+    await waitForSocketClose(firstSocket);
+
+    const secondSocket = createClientSocket(baseUrl, {
+      conversation_id: 'ws-conversation-reconnect-1',
+    });
+    await waitForSocketOpen(secondSocket);
+
+    const secondResponsePromise = waitForSocketMessageMatching(
+      secondSocket,
+      (message) => message?.type === 'response.completed' && message?.response?.id === 'resp_upstream_2',
+    );
+    secondSocket.send(JSON.stringify({
+      type: 'response.create',
+      model: 'gpt-5.4',
+      input: [
+        {
+          id: 'tool_out_ws_reconnect_1',
+          type: 'function_call_output',
+          call_id: 'call_ws_reconnect_1',
+          output: '{"ok":true}',
+        },
+      ],
+    }));
+    await secondResponsePromise;
+    secondSocket.close();
+
+    expect(upstreamConnectionCount).toBe(2);
+    expect(upstreamRequests).toHaveLength(2);
+    expect(upstreamRequests[1]).toMatchObject({
+      type: 'response.create',
+      previous_response_id: 'resp_upstream_1',
+      input: [
+        {
+          id: 'tool_out_ws_reconnect_1',
+          type: 'function_call_output',
+          call_id: 'call_ws_reconnect_1',
           output: '{"ok":true}',
         },
       ],
@@ -1419,6 +1555,79 @@ describe('responses websocket transport', () => {
       call_id: 'call_1',
       output: 'tool result',
     });
+  });
+
+  it('applies service_tier policy to websocket frames before upstream dispatch', async () => {
+    (config as any).openAiServiceTierRules = [{
+      action: 'filter',
+      tiers: ['priority'],
+      platforms: ['openai'],
+    }];
+    const selectedChannel = createSelectedChannel({
+      sitePlatform: 'openai',
+      actualModel: 'gpt-4.1',
+    });
+    selectChannelMock.mockReturnValue(selectedChannel);
+    previewSelectedChannelMock.mockResolvedValue(selectedChannel);
+    fetchMock.mockResolvedValueOnce(createSseResponse([
+      'event: response.completed\n',
+      'data: {"type":"response.completed","response":{"id":"resp_ws_tier","model":"gpt-4.1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}\n\n',
+      'data: [DONE]\n\n',
+    ]));
+
+    const socket = createClientSocket(baseUrl);
+    await waitForSocketOpen(socket);
+    const responsePromise = waitForSocketMessageMatching(
+      socket,
+      (message) => message?.type === 'response.completed',
+    );
+    socket.send(JSON.stringify({
+      type: 'response.create',
+      model: 'gpt-4.1',
+      service_tier: 'fast',
+      input: [],
+    }));
+    await responsePromise;
+    socket.close();
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const forwardedBody = JSON.parse(String(options.body));
+    expect(forwardedBody.service_tier).toBeUndefined();
+    (config as any).openAiServiceTierRules = undefined;
+  });
+
+  it('blocks websocket service_tier before upstream dispatch', async () => {
+    (config as any).openAiServiceTierRules = [{
+      action: 'block',
+      tiers: ['priority'],
+      platforms: ['openai'],
+    }];
+    const selectedChannel = createSelectedChannel({
+      sitePlatform: 'openai',
+      actualModel: 'gpt-4.1',
+    });
+    selectChannelMock.mockReturnValue(selectedChannel);
+    previewSelectedChannelMock.mockResolvedValue(selectedChannel);
+
+    const socket = createClientSocket(baseUrl);
+    await waitForSocketOpen(socket);
+    const errorPromise = waitForSocketMessageMatching(
+      socket,
+      (message) => message?.type === 'error',
+    );
+    socket.send(JSON.stringify({
+      type: 'response.create',
+      model: 'gpt-4.1',
+      service_tier: 'fast',
+      input: [],
+    }));
+    const message = await errorPromise;
+    socket.close();
+
+    expect(message.status).toBe(400);
+    expect(message.error.message).toContain('service_tier');
+    expect(fetchMock).not.toHaveBeenCalled();
+    (config as any).openAiServiceTierRules = undefined;
   });
 
   it('keeps streamed output items for follow-up turns when the terminal HTTP fallback payload has an empty output array', async () => {
